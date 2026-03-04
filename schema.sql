@@ -30,7 +30,7 @@ CREATE TABLE req_service (
     service_id INT UNSIGNED NOT NULL,
     requester_id INT UNSIGNED NOT NULL,
     
-    status VARCHAR(50) DEFAULT 'pending',
+    status ENUM('pending', 'accepted', 'rejected', 'completed') NOT NULL DEFAULT 'pending',
     
     requested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     
@@ -47,7 +47,7 @@ CREATE TABLE products (
     product_title VARCHAR(255) NOT NULL,
     description TEXT,
     price DECIMAL(10,2),
-    status VARCHAR(50) DEFAULT 'available',
+    status ENUM('available', 'reserved', 'sold') NOT NULL DEFAULT 'available',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     FOREIGN KEY (owner_id) REFERENCES students(student_id)
