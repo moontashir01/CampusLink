@@ -143,3 +143,21 @@ CREATE TABLE reviews (
         (service_id IS NULL AND product_id IS NULL AND company_id IS NOT NULL)
     )
 );
+
+
+INSERT INTO `students` (`student_id`, `username`, `passwd`, `f_name`, `m_name`, `l_name`, `address`, `birth_day`, `created_at`, `email`, `phone`) VALUES
+(NULL, 'test', 'test', 'test', NULL, NULL, 'dhk', '2016-03-03', current_timestamp(), 'test@test.com', '01955994096');
+
+
+INSERT INTO `products` (`product_id`, `owner_id`, `product_title`, `description`, `price`, `status`, `created_at`) VALUES 
+(NULL, '1', 'Notes', 'CSE311 Notes', '500', 'available', current_timestamp());
+
+
+INSERT INTO `services` (`service_id`, `student_id`, `service_title`, `description`, `price`, `created_at`) VALUES 
+(NULL, '1', 'CSE311 Tutoring', 'Expert in ERD, Normalization and SQL', '1200', current_timestamp());
+
+INSERT INTO `companies` (`company_id`, `username`, `passwd`, `name`, `address`, `created_at`, `email`, `phone`) VALUES 
+(NULL, 'pathao_u', 'pathao', 'Pathao Ltd.', 'dhk', current_timestamp(), 'pathao@pathao.com', '01955994088');
+
+INSERT INTO `jobs` (`job_id`, `company_id`, `job_title`, `description`, `salary`, `created_at`) VALUES 
+(NULL, '1', 'Junior Software Engineer', 'Expirenced in Java & Python', '30000', current_timestamp());
