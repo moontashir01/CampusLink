@@ -78,7 +78,7 @@ if ($jobResult) {
                 <button class="user-trigger" type="button"><?php echo $username; ?></button>
                 <div class="dropdown">
                     <a href="profile.php">My Profile</a>
-                    <a href="logout.php">Log Out</a>
+                    <a href="index.php">Log Out</a>
                 </div>
             </div>
         </header>
