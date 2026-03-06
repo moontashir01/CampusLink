@@ -102,18 +102,41 @@
             transform: translateY(0);
         }
 
-        .dropdown a {
-            display: block;
-            padding: 10px 12px;
-            text-decoration: none;
+.dropdown a {
+    display: block;
+    padding: 10px 12px;
+    text-decoration: none;
             color: #1f2937;
             font-size: 0.92rem;
             transition: background 0.2s ease;
         }
 
-        .dropdown a:hover {
-            background: #f3f4f6;
-        }
+.dropdown a:hover {
+    background: #f3f4f6;
+}
+
+.logout-form {
+    margin: 0;
+}
+
+.dropdown-action {
+    display: block;
+    width: 100%;
+    padding: 10px 12px;
+    text-align: left;
+    text-decoration: none;
+    color: #1f2937;
+    font-size: 0.92rem;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    font: inherit;
+    transition: background 0.2s ease;
+}
+
+.dropdown-action:hover {
+    background: #f3f4f6;
+}
 
         .hero {
             margin-bottom: 26px;
