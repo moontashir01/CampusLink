@@ -2,12 +2,16 @@
 session_start();
 require_once 'connection.php';
 
-if (!isset($_SESSION['username'])) {
-    // Fallback when session is not yet wired from login.
-    $_SESSION['username'] = 'Guest User';
+if (($_SESSION['role'] ?? '') !== 'student' || !isset($_SESSION['student_id'])) {
+    if (($_SESSION['role'] ?? '') === 'company' && isset($_SESSION['company_id'])) {
+        header('Location: compHomepage.php');
+    } else {
+        header('Location: index.php');
+    }
+    exit();
 }
 
-$username = htmlspecialchars($_SESSION['username']);
+$username = htmlspecialchars($_SESSION['username'] ?? 'Student');
 
 $services = [];
 $products = [];
