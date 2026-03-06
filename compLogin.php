@@ -3,7 +3,11 @@ session_start();
 require_once 'connection.php';
 
 if (isset($_SESSION['role'])) {
-    header('Location: homepage.php');
+    if ($_SESSION['role'] === 'company') {
+        header('Location: compHomepage.php');
+    } else {
+        header('Location: homepage.php');
+    }
     exit();
 }
 
@@ -53,7 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                header('Location: homepage.php');
+                header('Location: compHomepage.php');
                 exit();
             }
 
