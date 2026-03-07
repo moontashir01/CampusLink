@@ -213,7 +213,7 @@ $productSql = "
 ";
 
 if ($searchQuery !== '') {
-    $productSql .= " WHERE p.product_title LIKE ? ";
+    $productSql .= " WHERE (p.product_title LIKE ? OR COALESCE(p.description, '') LIKE ?) ";
 }
 
 $productSql .= "
@@ -226,7 +226,7 @@ $productStmt = mysqli_prepare($con, $productSql);
 if ($productStmt) {
     if ($searchQuery !== '') {
         $searchLike = '%' . $searchQuery . '%';
-        mysqli_stmt_bind_param($productStmt, 's', $searchLike);
+        mysqli_stmt_bind_param($productStmt, 'ss', $searchLike, $searchLike);
     }
 
     mysqli_stmt_execute($productStmt);
@@ -330,6 +330,8 @@ foreach ($products as $productRow) {
         }
 
         .search-form button,
+        .buy-actions button,
+        .review-form button,
         .link-button {
             border: 0;
             border-radius: 10px;
@@ -347,6 +349,8 @@ foreach ($products as $productRow) {
         }
 
         .search-form button:hover,
+        .buy-actions button:hover,
+        .review-form button:hover,
         .link-button:hover {
             transform: translateY(-1px);
             box-shadow: 0 10px 18px rgba(14, 116, 144, 0.22);
@@ -520,7 +524,7 @@ foreach ($products as $productRow) {
                     <input
                         type="search"
                         name="q"
-                        placeholder="Search products by title..."
+                        placeholder="Search products by title or description..."
                         value="<?php echo htmlspecialchars($searchQuery); ?>"
                     >
                     <button type="submit">Search</button>

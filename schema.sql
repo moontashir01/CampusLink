@@ -47,6 +47,7 @@ CREATE TABLE products (
     product_title VARCHAR(255) NOT NULL,
     description TEXT,
     price DECIMAL(10,2),
+    qty INT(6),
     status ENUM('available', 'reserved', 'sold') NOT NULL DEFAULT 'available',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 

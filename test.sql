@@ -4,8 +4,8 @@ INSERT INTO `students` (`student_id`, `username`, `passwd`, `f_name`, `m_name`, 
 (NULL, 'test', 'test', 'test', NULL, NULL, 'dhk', '2016-03-03', current_timestamp(), 'test@test.com', '01955994096');
 
 
-INSERT INTO `products` (`product_id`, `owner_id`, `product_title`, `description`, `price`, `status`, `created_at`) VALUES 
-(NULL, '1', 'Notes', 'CSE311 Notes', '500', 'available', current_timestamp());
+INSERT INTO `products` (`product_id`, `owner_id`, `product_title`, `description`, `price`, `qty` , `status`, `created_at`) VALUES 
+(NULL, '1', 'Notes', 'CSE311 Notes', '500', '10' , 'available', current_timestamp());
 
 
 INSERT INTO `services` (`service_id`, `student_id`, `service_title`, `description`, `price`, `created_at`) VALUES 
