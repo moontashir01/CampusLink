@@ -100,7 +100,7 @@ if ($jobResult) {
                 <h3>Find Services</h3>
                 <p>Hire talented students for quick campus tasks.</p>
             </a>
-            <a class="tab-card" href="#products">
+            <a class="tab-card" href="products.php">
                 <h3>Listed Products</h3>
                 <p>Buy and sell useful items within your community.</p>
             </a>
