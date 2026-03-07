@@ -14,6 +14,23 @@ if (($_SESSION['role'] ?? '') !== 'student' || !isset($_SESSION['student_id'])) 
 $studentId = (int) $_SESSION['student_id'];
 $username = htmlspecialchars($_SESSION['username'] ?? 'Student');
 
+// If DB was reset and session kept old id, prevent FK failures on buy/review.
+$studentCheckStmt = mysqli_prepare($con, 'SELECT student_id FROM students WHERE student_id = ? LIMIT 1');
+if ($studentCheckStmt) {
+    mysqli_stmt_bind_param($studentCheckStmt, 'i', $studentId);
+    mysqli_stmt_execute($studentCheckStmt);
+    $studentCheckResult = mysqli_stmt_get_result($studentCheckStmt);
+    $studentExists = $studentCheckResult ? mysqli_fetch_assoc($studentCheckResult) : null;
+    mysqli_stmt_close($studentCheckStmt);
+
+    if (!$studentExists) {
+        session_unset();
+        session_destroy();
+        header('Location: login.php');
+        exit();
+    }
+}
+
 function buildRedirectUrl(string $search, int $productId = 0): string
 {
     $params = [];
@@ -33,84 +50,124 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $postProductId = (int) ($_POST['product_id'] ?? 0);
 
     if ($action === 'buy_product') {
-        if ($postProductId <= 0) {
-            $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Invalid product selection.'];
-            header('Location: ' . buildRedirectUrl($searchRedirect));
-            exit();
-        }
+        $buyQty = (int) ($_POST['buy_qty'] ?? 0);
 
-        $checkStmt = mysqli_prepare(
-            $con,
-            'SELECT owner_id, status FROM products WHERE product_id = ? LIMIT 1'
-        );
-
-        if (!$checkStmt) {
-            $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Could not process buy request.'];
+        if ($postProductId <= 0 || $buyQty <= 0) {
+            $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Invalid product or quantity.'];
             header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId));
             exit();
         }
 
-        mysqli_stmt_bind_param($checkStmt, 'i', $postProductId);
-        mysqli_stmt_execute($checkStmt);
-        $checkResult = mysqli_stmt_get_result($checkStmt);
-        $product = $checkResult ? mysqli_fetch_assoc($checkResult) : null;
-        mysqli_stmt_close($checkStmt);
-
-        if (!$product) {
-            $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Product not found.'];
-            header('Location: ' . buildRedirectUrl($searchRedirect));
-            exit();
-        }
-
-        if ((int) $product['owner_id'] === $studentId) {
-            $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'You cannot buy your own product.'];
-            header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId));
-            exit();
-        }
-
-        if (($product['status'] ?? '') !== 'available') {
-            $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'This product is no longer available.'];
-            header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId));
-            exit();
-        }
-
-        mysqli_begin_transaction($con);
         $ok = true;
-
-        $buyStmt = mysqli_prepare(
-            $con,
-            'INSERT INTO buy_product (product_id, buyer_id) VALUES (?, ?)'
-        );
-
-        if ($buyStmt) {
-            mysqli_stmt_bind_param($buyStmt, 'ii', $postProductId, $studentId);
-            $ok = mysqli_stmt_execute($buyStmt);
-            mysqli_stmt_close($buyStmt);
-        } else {
+        $startedTransaction = false;
+        try {
+            mysqli_begin_transaction($con);
+            $startedTransaction = true;
+        } catch (mysqli_sql_exception $e) {
             $ok = false;
         }
 
-        if ($ok) {
-            $updateStmt = mysqli_prepare(
+        try {
+            $checkStmt = mysqli_prepare(
                 $con,
-                "UPDATE products SET status = 'sold' WHERE product_id = ? AND status = 'available'"
+                'SELECT owner_id, COALESCE(qty, 0) AS qty, price FROM products WHERE product_id = ? LIMIT 1 FOR UPDATE'
             );
 
-            if ($updateStmt) {
-                mysqli_stmt_bind_param($updateStmt, 'i', $postProductId);
-                $ok = mysqli_stmt_execute($updateStmt) && (mysqli_stmt_affected_rows($updateStmt) > 0);
-                mysqli_stmt_close($updateStmt);
-            } else {
+            if (!$checkStmt) {
                 $ok = false;
+            }
+
+            $product = null;
+            if ($ok) {
+                mysqli_stmt_bind_param($checkStmt, 'i', $postProductId);
+                mysqli_stmt_execute($checkStmt);
+                $checkResult = mysqli_stmt_get_result($checkStmt);
+                $product = $checkResult ? mysqli_fetch_assoc($checkResult) : null;
+                mysqli_stmt_close($checkStmt);
+
+                if (!$product) {
+                    $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Product not found.'];
+                    $ok = false;
+                } elseif ((int) $product['owner_id'] === $studentId) {
+                    $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'You cannot buy your own product.'];
+                    $ok = false;
+                } elseif ((int) $product['qty'] <= 0) {
+                    $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'This product is sold out.'];
+                    $ok = false;
+                } elseif ($buyQty > (int) $product['qty']) {
+                    $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Requested quantity is higher than available stock.'];
+                    $ok = false;
+                }
+            }
+
+            if ($ok) {
+                $buyStmt = mysqli_prepare(
+                    $con,
+                    'INSERT INTO buy_product (product_id, buyer_id) VALUES (?, ?)'
+                );
+
+                if ($buyStmt) {
+                    for ($i = 0; $i < $buyQty; $i++) {
+                        mysqli_stmt_bind_param($buyStmt, 'ii', $postProductId, $studentId);
+                        if (!mysqli_stmt_execute($buyStmt)) {
+                            $ok = false;
+                            break;
+                        }
+                    }
+                    mysqli_stmt_close($buyStmt);
+                } else {
+                    $ok = false;
+                }
+            }
+
+            if ($ok) {
+                $updateStmt = mysqli_prepare(
+                    $con,
+                    "UPDATE products
+                     SET qty = qty - ?,
+                         status = CASE WHEN qty - ? <= 0 THEN 'sold' ELSE 'available' END
+                     WHERE product_id = ?"
+                );
+
+                if ($updateStmt) {
+                    mysqli_stmt_bind_param($updateStmt, 'iii', $buyQty, $buyQty, $postProductId);
+                    $ok = mysqli_stmt_execute($updateStmt) && (mysqli_stmt_affected_rows($updateStmt) > 0);
+                    mysqli_stmt_close($updateStmt);
+                } else {
+                    $ok = false;
+                }
+            }
+        } catch (mysqli_sql_exception $e) {
+            if (str_contains($e->getMessage(), 'buy_product_ibfk_2')) {
+                $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Session is out of sync with database. Please log in again.'];
+            } else {
+                $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'A database error occurred while buying this product.'];
+            }
+            $ok = false;
+        }
+
+        if ($ok && $startedTransaction) {
+            mysqli_commit($con);
+            $totalAmount = ((float) ($product['price'] ?? 0)) * $buyQty;
+            $_SESSION['product_flash'] = [
+                'type' => 'success',
+                'message' => 'Purchase successful. Total amount: $' . number_format($totalAmount, 2),
+            ];
+        } else {
+            if ($startedTransaction) {
+                mysqli_rollback($con);
+            }
+            if (!isset($_SESSION['product_flash'])) {
+                $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Could not complete purchase.'];
             }
         }
 
-        if ($ok) {
-            mysqli_commit($con);
-            $_SESSION['product_flash'] = ['type' => 'success', 'message' => 'Product bought successfully.'];
-        } else {
-            mysqli_rollback($con);
-            $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Could not complete purchase.'];
+        if (is_array($_SESSION['product_flash'] ?? null)
+            && ($_SESSION['product_flash']['message'] ?? '') === 'Session is out of sync with database. Please log in again.') {
+            session_unset();
+            session_destroy();
+            header('Location: login.php');
+            exit();
         }
 
         header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId));
@@ -139,46 +196,78 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit();
         }
 
-        $checkStmt = mysqli_prepare(
-            $con,
-            'SELECT product_id FROM products WHERE product_id = ? LIMIT 1'
-        );
+        try {
+            $existsStmt = mysqli_prepare($con, 'SELECT product_id FROM products WHERE product_id = ? LIMIT 1');
 
-        if (!$checkStmt) {
-            $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Could not verify product.'];
-            header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId));
-            exit();
-        }
+            if (!$existsStmt) {
+                $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Could not verify product.'];
+                header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId));
+                exit();
+            }
 
-        mysqli_stmt_bind_param($checkStmt, 'i', $postProductId);
-        mysqli_stmt_execute($checkStmt);
-        $checkResult = mysqli_stmt_get_result($checkStmt);
-        $exists = $checkResult ? mysqli_fetch_assoc($checkResult) : null;
-        mysqli_stmt_close($checkStmt);
+            mysqli_stmt_bind_param($existsStmt, 'i', $postProductId);
+            mysqli_stmt_execute($existsStmt);
+            $existsResult = mysqli_stmt_get_result($existsStmt);
+            $exists = $existsResult ? mysqli_fetch_assoc($existsResult) : null;
+            mysqli_stmt_close($existsStmt);
 
-        if (!$exists) {
-            $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Product not found for review.'];
-            header('Location: ' . buildRedirectUrl($searchRedirect));
-            exit();
-        }
+            if (!$exists) {
+                $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Product not found for review.'];
+                header('Location: ' . buildRedirectUrl($searchRedirect));
+                exit();
+            }
 
-        $reviewStmt = mysqli_prepare(
-            $con,
-            'INSERT INTO reviews (reviewer_id, product_id, rating, comment) VALUES (?, ?, ?, ?)'
-        );
+            $buyerStmt = mysqli_prepare(
+                $con,
+                'SELECT buy_id FROM buy_product WHERE product_id = ? AND buyer_id = ? LIMIT 1'
+            );
 
-        if ($reviewStmt) {
-            mysqli_stmt_bind_param($reviewStmt, 'iiis', $studentId, $postProductId, $rating, $comment);
-            $inserted = mysqli_stmt_execute($reviewStmt);
-            mysqli_stmt_close($reviewStmt);
+            if (!$buyerStmt) {
+                $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Could not verify review eligibility.'];
+                header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId));
+                exit();
+            }
 
-            if ($inserted) {
-                $_SESSION['product_flash'] = ['type' => 'success', 'message' => 'Your review was submitted.'];
+            mysqli_stmt_bind_param($buyerStmt, 'ii', $postProductId, $studentId);
+            mysqli_stmt_execute($buyerStmt);
+            $buyerResult = mysqli_stmt_get_result($buyerStmt);
+            $hasBought = $buyerResult ? mysqli_fetch_assoc($buyerResult) : null;
+            mysqli_stmt_close($buyerStmt);
+
+            if (!$hasBought) {
+                $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Only users who bought this product can review it.'];
+                header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId));
+                exit();
+            }
+
+            $reviewStmt = mysqli_prepare(
+                $con,
+                'INSERT INTO reviews (reviewer_id, product_id, rating, comment) VALUES (?, ?, ?, ?)'
+            );
+
+            if ($reviewStmt) {
+                mysqli_stmt_bind_param($reviewStmt, 'iiis', $studentId, $postProductId, $rating, $comment);
+                $inserted = mysqli_stmt_execute($reviewStmt);
+                mysqli_stmt_close($reviewStmt);
+
+                if ($inserted) {
+                    $_SESSION['product_flash'] = ['type' => 'success', 'message' => 'Your review was submitted.'];
+                } else {
+                    $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Could not submit review.'];
+                }
             } else {
                 $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Could not submit review.'];
             }
-        } else {
-            $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Could not submit review.'];
+        } catch (mysqli_sql_exception $e) {
+            if (str_contains($e->getMessage(), 'buy_product_ibfk_2')) {
+                $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Session is out of sync with database. Please log in again.'];
+                session_unset();
+                session_destroy();
+                header('Location: login.php');
+                exit();
+            }
+
+            $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'A database error occurred while submitting review.'];
         }
 
         header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId));
@@ -202,32 +291,30 @@ $productSql = "
         p.product_title,
         p.description,
         p.price,
+        COALESCE(p.qty, 0) AS qty,
         p.status,
         p.created_at,
         st.username AS owner_username,
         COALESCE(AVG(r.rating), 0) AS avg_rating,
-        COUNT(r.review_id) AS review_count
+        COUNT(r.review_id) AS review_count,
+        EXISTS(
+            SELECT 1
+            FROM buy_product bp
+            WHERE bp.product_id = p.product_id AND bp.buyer_id = ?
+        ) AS has_bought
     FROM products p
     INNER JOIN students st ON p.owner_id = st.student_id
     LEFT JOIN reviews r ON r.product_id = p.product_id
-";
-
-if ($searchQuery !== '') {
-    $productSql .= " WHERE (p.product_title LIKE ? OR COALESCE(p.description, '') LIKE ?) ";
-}
-
-$productSql .= "
-    GROUP BY p.product_id, p.owner_id, p.product_title, p.description, p.price, p.status, p.created_at, st.username
+    WHERE (? = '' OR p.product_title LIKE ? OR COALESCE(p.description, '') LIKE ?)
+    GROUP BY p.product_id, p.owner_id, p.product_title, p.description, p.price, p.qty, p.status, p.created_at, st.username
     ORDER BY p.created_at DESC
 ";
 
 $productStmt = mysqli_prepare($con, $productSql);
 
 if ($productStmt) {
-    if ($searchQuery !== '') {
-        $searchLike = '%' . $searchQuery . '%';
-        mysqli_stmt_bind_param($productStmt, 'ss', $searchLike, $searchLike);
-    }
+    $searchLike = '%' . $searchQuery . '%';
+    mysqli_stmt_bind_param($productStmt, 'isss', $studentId, $searchQuery, $searchLike, $searchLike);
 
     mysqli_stmt_execute($productStmt);
     $productResult = mysqli_stmt_get_result($productStmt);
@@ -298,20 +385,37 @@ foreach ($products as $productRow) {
     <link rel="stylesheet" href="styles.css">
     <link rel="shortcut icon" href="img/logo.png" type="image/x-icon">
     <style>
-        .products-shell {
+        .products-wrap {
             display: grid;
-            gap: 16px;
+            gap: 18px;
+        }
+
+        .products-hero {
+            border: 1px solid #bfdbfe;
+            background: linear-gradient(135deg, #f0f9ff, #ecfeff 60%, #f0fdfa);
+            border-radius: 16px;
+            padding: 18px;
+            box-shadow: 0 14px 34px rgba(2, 132, 199, 0.12);
+        }
+
+        .products-hero h2 {
+            font-size: 1.45rem;
+            margin-bottom: 4px;
+        }
+
+        .products-hero p {
+            color: #475569;
+            font-size: 0.94rem;
         }
 
         .toolbar {
             display: flex;
-            gap: 12px;
-            align-items: center;
-            justify-content: space-between;
             flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
             border: 1px solid var(--line);
-            border-radius: var(--radius-md);
             background: var(--surface-solid);
+            border-radius: 14px;
             padding: 12px;
         }
 
@@ -323,23 +427,22 @@ foreach ($products as $productRow) {
 
         .search-form input {
             width: 100%;
-            border: 1px solid var(--line);
+            border: 1px solid #cbd5e1;
             border-radius: 10px;
             padding: 10px 12px;
             font: inherit;
+            background: #fff;
         }
 
-        .search-form button,
-        .buy-actions button,
-        .review-form button,
+        .action-btn,
         .link-button {
             border: 0;
             border-radius: 10px;
-            background: linear-gradient(135deg, #0f766e, #0ea5e9);
+            background: linear-gradient(120deg, #0ea5e9, #0f766e);
             color: #fff;
-            padding: 10px 14px;
             font: inherit;
-            font-weight: 600;
+            font-weight: 700;
+            padding: 10px 14px;
             cursor: pointer;
             text-decoration: none;
             display: inline-flex;
@@ -348,30 +451,63 @@ foreach ($products as $productRow) {
             transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
 
-        .search-form button:hover,
-        .buy-actions button:hover,
-        .review-form button:hover,
+        .action-btn:hover,
         .link-button:hover {
             transform: translateY(-1px);
-            box-shadow: 0 10px 18px rgba(14, 116, 144, 0.22);
+            box-shadow: 0 10px 20px rgba(14, 116, 144, 0.24);
+        }
+
+        .link-button {
+            background: linear-gradient(120deg, #1e293b, #334155);
+        }
+
+        .products-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 14px;
         }
 
         .product-link {
             text-decoration: none;
             color: inherit;
-            display: block;
+        }
+
+        .product-card {
+            border: 1px solid #dbeafe;
+            border-radius: 14px;
+            padding: 14px;
+            background: linear-gradient(180deg, #ffffff, #f8fafc);
+            box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            height: 100%;
+            display: grid;
+            gap: 7px;
+        }
+
+        .product-link:hover .product-card {
+            transform: translateY(-4px);
+            box-shadow: 0 16px 28px rgba(14, 116, 144, 0.18);
+        }
+
+        .card-top {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            align-items: flex-start;
+        }
+
+        .product-title {
+            font-size: 1rem;
+            font-weight: 700;
         }
 
         .status-pill {
-            display: inline-block;
-            font-size: 0.78rem;
-            font-weight: 600;
             border-radius: 999px;
-            padding: 3px 8px;
-            background: #f3f4f6;
-            color: #374151;
-            margin-left: 8px;
-            text-transform: capitalize;
+            font-size: 0.78rem;
+            font-weight: 700;
+            padding: 4px 8px;
+            text-transform: uppercase;
+            white-space: nowrap;
         }
 
         .status-available {
@@ -379,31 +515,41 @@ foreach ($products as $productRow) {
             color: #166534;
         }
 
-        .status-reserved {
-            background: #fef3c7;
-            color: #92400e;
-        }
-
-        .status-sold {
+        .status-soldout {
             background: #fee2e2;
             color: #991b1b;
         }
 
-        .rating-text {
-            color: var(--muted);
+        .meta {
+            color: #64748b;
             font-size: 0.86rem;
-            margin-top: 6px;
+        }
+
+        .price {
+            color: #0f766e;
+            font-weight: 700;
+        }
+
+        .qty-text {
+            font-size: 0.86rem;
+            color: #334155;
+            font-weight: 600;
+        }
+
+        .rating-text {
+            color: #64748b;
+            font-size: 0.84rem;
         }
 
         .modal {
             position: fixed;
             inset: 0;
-            background: rgba(17, 24, 39, 0.55);
+            z-index: 120;
+            background: rgba(2, 6, 23, 0.62);
             display: none;
             align-items: center;
             justify-content: center;
             padding: 16px;
-            z-index: 100;
         }
 
         .modal.open {
@@ -411,13 +557,13 @@ foreach ($products as $productRow) {
         }
 
         .modal-card {
-            width: min(760px, 100%);
-            max-height: 88vh;
+            width: min(820px, 100%);
+            max-height: 90vh;
             overflow-y: auto;
             border-radius: 16px;
-            border: 1px solid var(--line);
+            border: 1px solid #dbeafe;
             background: #fff;
-            box-shadow: 0 24px 45px rgba(17, 24, 39, 0.28);
+            box-shadow: 0 26px 44px rgba(15, 23, 42, 0.28);
             padding: 16px;
             display: grid;
             gap: 14px;
@@ -426,32 +572,56 @@ foreach ($products as $productRow) {
         .modal-header {
             display: flex;
             justify-content: space-between;
-            gap: 10px;
             align-items: flex-start;
+            gap: 10px;
         }
 
         .close-link {
+            border: 1px solid #cbd5e1;
+            border-radius: 9px;
+            padding: 6px 10px;
             text-decoration: none;
-            color: #374151;
-            font-weight: 600;
-            border: 1px solid var(--line);
-            border-radius: 8px;
-            padding: 4px 10px;
+            color: #334155;
+            font-weight: 700;
             background: #fff;
         }
 
-        .buy-actions {
-            display: flex;
-            flex-wrap: wrap;
+        .buy-panel {
+            border: 1px solid #dbeafe;
+            border-radius: 12px;
+            padding: 12px;
+            background: #f8fbff;
+            display: grid;
             gap: 10px;
-            align-items: center;
         }
 
-        .buy-actions button[disabled] {
-            background: #e5e7eb;
-            color: #6b7280;
-            cursor: not-allowed;
+        .buy-form-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .buy-form-row input[type="number"] {
+            width: 140px;
+            border: 1px solid #cbd5e1;
+            border-radius: 10px;
+            padding: 9px 11px;
+            font: inherit;
+            background: #fff;
+        }
+
+        .total-amount {
+            color: #0f172a;
+            font-weight: 700;
+            font-size: 0.92rem;
+        }
+
+        .action-btn[disabled] {
+            background: #e2e8f0;
+            color: #64748b;
             box-shadow: none;
+            cursor: not-allowed;
             transform: none;
         }
 
@@ -461,36 +631,65 @@ foreach ($products as $productRow) {
         }
 
         .review-item {
-            border: 1px solid var(--line);
+            border: 1px solid #e2e8f0;
             border-radius: 10px;
             padding: 10px;
-            background: #f9fafb;
+            background: #f8fafc;
         }
 
         .review-head {
             display: flex;
             justify-content: space-between;
             gap: 8px;
-            font-size: 0.86rem;
-            color: var(--muted);
-            margin-bottom: 6px;
+            margin-bottom: 5px;
+            font-size: 0.84rem;
+            color: #64748b;
         }
 
         .review-form {
+            border-top: 1px solid #e2e8f0;
+            padding-top: 12px;
             display: grid;
             gap: 8px;
-            border-top: 1px solid var(--line);
-            padding-top: 12px;
         }
 
-        .review-form textarea,
-        .review-form select {
+        .review-form select,
+        .review-form textarea {
             width: 100%;
-            border: 1px solid var(--line);
+            border: 1px solid #cbd5e1;
             border-radius: 10px;
             padding: 10px 12px;
             font: inherit;
             background: #fff;
+        }
+
+        .review-lock {
+            border-top: 1px solid #e2e8f0;
+            padding-top: 12px;
+            color: #b45309;
+            font-size: 0.92rem;
+            font-weight: 600;
+        }
+
+        .empty {
+            color: #64748b;
+            font-size: 0.93rem;
+        }
+
+        @media (max-width: 980px) {
+            .products-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 640px) {
+            .products-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .modal-card {
+                padding: 12px;
+            }
         }
     </style>
 </head>
@@ -499,7 +698,7 @@ foreach ($products as $productRow) {
         <header class="topbar">
             <div class="brand">
                 <h1>CampusLink Products</h1>
-                <p>Browse all listed products and check item reviews before buying.</p>
+                <p>Buy products by quantity and review items you actually purchased.</p>
             </div>
             <div class="user-menu">
                 <button class="user-trigger" type="button"><?php echo $username; ?></button>
@@ -512,7 +711,12 @@ foreach ($products as $productRow) {
             </div>
         </header>
 
-        <div class="products-shell">
+        <div class="products-wrap">
+            <section class="products-hero">
+                <h2>Listed Products</h2>
+                <p>Search, open details, choose quantity, and buy instantly. Product remains available until quantity reaches zero.</p>
+            </section>
+
             <?php if (is_array($flash) && isset($flash['message'])): ?>
                 <div class="auth-message <?php echo ($flash['type'] ?? '') === 'success' ? 'success' : 'error'; ?>">
                     <?php echo htmlspecialchars($flash['message']); ?>
@@ -521,30 +725,25 @@ foreach ($products as $productRow) {
 
             <section class="toolbar">
                 <form class="search-form" method="get" action="products.php">
-                    <input
-                        type="search"
-                        name="q"
-                        placeholder="Search products by title or description..."
-                        value="<?php echo htmlspecialchars($searchQuery); ?>"
-                    >
-                    <button type="submit">Search</button>
+                    <input type="search" name="q" placeholder="Search products by title or description..." value="<?php echo htmlspecialchars($searchQuery); ?>">
+                    <button type="submit" class="action-btn">Search</button>
                 </form>
                 <a class="link-button" href="products.php">Show All</a>
             </section>
 
             <section class="section">
-                <h3>Listed Products</h3>
                 <?php if ($searchQuery !== ''): ?>
                     <p class="meta">Search results for "<?php echo htmlspecialchars($searchQuery); ?>"</p>
                 <?php endif; ?>
 
                 <?php if (count($products) > 0): ?>
-                    <div class="grid">
+                    <div class="products-grid">
                         <?php foreach ($products as $product): ?>
                             <?php
                                 $pid = (int) $product['product_id'];
-                                $status = strtolower((string) ($product['status'] ?? 'available'));
-                                $statusClass = in_array($status, ['available', 'reserved', 'sold'], true) ? $status : 'available';
+                                $qty = max(0, (int) ($product['qty'] ?? 0));
+                                $displayStatus = $qty > 0 ? 'available' : 'sold out';
+                                $statusClass = $qty > 0 ? 'status-available' : 'status-soldout';
                                 $queryParams = [];
                                 if ($searchQuery !== '') {
                                     $queryParams['q'] = $searchQuery;
@@ -553,15 +752,14 @@ foreach ($products as $productRow) {
                                 $cardHref = 'products.php?' . http_build_query($queryParams);
                             ?>
                             <a class="product-link" href="<?php echo htmlspecialchars($cardHref); ?>">
-                                <article class="item">
-                                    <h4>
-                                        <?php echo htmlspecialchars($product['product_title']); ?>
-                                        <span class="status-pill status-<?php echo htmlspecialchars($statusClass); ?>">
-                                            <?php echo htmlspecialchars($status); ?>
-                                        </span>
-                                    </h4>
+                                <article class="product-card">
+                                    <div class="card-top">
+                                        <h4 class="product-title"><?php echo htmlspecialchars($product['product_title']); ?></h4>
+                                        <span class="status-pill <?php echo $statusClass; ?>"><?php echo htmlspecialchars($displayStatus); ?></span>
+                                    </div>
                                     <p class="meta">By <?php echo htmlspecialchars($product['owner_username']); ?></p>
                                     <p><?php echo htmlspecialchars($product['description'] ?? 'No description provided.'); ?></p>
+                                    <p class="qty-text">Stock left: <?php echo $qty; ?></p>
                                     <p class="price">$<?php echo number_format((float) $product['price'], 2); ?></p>
                                     <p class="rating-text">
                                         Rating: <?php echo number_format((float) $product['avg_rating'], 1); ?>/5
@@ -581,49 +779,71 @@ foreach ($products as $productRow) {
     <?php if ($selectedProduct): ?>
         <?php
             $pid = (int) $selectedProduct['product_id'];
-            $status = strtolower((string) ($selectedProduct['status'] ?? 'available'));
+            $qty = max(0, (int) ($selectedProduct['qty'] ?? 0));
+            $displayStatus = $qty > 0 ? 'available' : 'sold out';
+            $statusClass = $qty > 0 ? 'status-available' : 'status-soldout';
             $productReviews = $reviewsByProduct[$pid] ?? [];
             $isOwner = ((int) $selectedProduct['owner_id']) === $studentId;
-            $canBuy = !$isOwner && $status === 'available';
+            $canBuy = !$isOwner && $qty > 0;
+            $canReview = ((int) ($selectedProduct['has_bought'] ?? 0)) === 1;
             $closeParams = [];
             if ($searchQuery !== '') {
                 $closeParams['q'] = $searchQuery;
             }
             $closeHref = 'products.php' . (count($closeParams) > 0 ? '?' . http_build_query($closeParams) : '');
+            $defaultQty = $qty > 0 ? 1 : 0;
+            $defaultTotal = ((float) $selectedProduct['price']) * $defaultQty;
         ?>
-        <div id="productModal" class="modal open" role="dialog" aria-modal="true" aria-label="Product details">
+        <div class="modal open" role="dialog" aria-modal="true" aria-label="Product details">
             <div class="modal-card">
                 <div class="modal-header">
                     <div>
                         <h3><?php echo htmlspecialchars($selectedProduct['product_title']); ?></h3>
                         <p class="meta">
                             By <?php echo htmlspecialchars($selectedProduct['owner_username']); ?> |
-                            <span class="status-pill status-<?php echo htmlspecialchars($status); ?>"><?php echo htmlspecialchars($status); ?></span>
+                            <span class="status-pill <?php echo $statusClass; ?>"><?php echo htmlspecialchars($displayStatus); ?></span>
                         </p>
                     </div>
                     <a href="<?php echo htmlspecialchars($closeHref); ?>" class="close-link">Close</a>
                 </div>
 
                 <p><?php echo htmlspecialchars($selectedProduct['description'] ?? 'No description provided.'); ?></p>
-                <p class="price">$<?php echo number_format((float) $selectedProduct['price'], 2); ?></p>
+                <p class="qty-text">Stock left: <?php echo $qty; ?></p>
+                <p class="price">Unit Price: $<?php echo number_format((float) $selectedProduct['price'], 2); ?></p>
 
-                <div class="buy-actions">
-                    <form method="post" action="products.php">
+                <div class="buy-panel">
+                    <form method="post" action="products.php" id="buyForm" class="buy-form-row">
                         <input type="hidden" name="action" value="buy_product">
                         <input type="hidden" name="product_id" value="<?php echo $pid; ?>">
                         <input type="hidden" name="q" value="<?php echo htmlspecialchars($searchQuery); ?>">
-                        <button type="submit" <?php echo $canBuy ? '' : 'disabled'; ?>>
+
+                        <label for="buy_qty">Quantity</label>
+                        <input
+                            type="number"
+                            id="buy_qty"
+                            name="buy_qty"
+                            min="1"
+                            max="<?php echo $qty; ?>"
+                            value="<?php echo $defaultQty; ?>"
+                            <?php echo $canBuy ? '' : 'disabled'; ?>
+                        >
+
+                        <button type="submit" class="action-btn" <?php echo $canBuy ? '' : 'disabled'; ?>>
                             <?php
                                 if ($isOwner) {
                                     echo 'You own this item';
-                                } elseif ($status !== 'available') {
-                                    echo 'Not available to buy';
+                                } elseif ($qty <= 0) {
+                                    echo 'Sold Out';
                                 } else {
-                                    echo 'Buy Product';
+                                    echo 'Buy Now';
                                 }
                             ?>
                         </button>
                     </form>
+
+                    <p class="total-amount">
+                        Total Amount: $<span id="totalAmount"><?php echo number_format($defaultTotal, 2); ?></span>
+                    </p>
                 </div>
 
                 <section>
@@ -645,29 +865,61 @@ foreach ($products as $productRow) {
                     <?php endif; ?>
                 </section>
 
-                <form method="post" action="products.php" class="review-form">
-                    <h4>Write a Review</h4>
-                    <input type="hidden" name="action" value="submit_review">
-                    <input type="hidden" name="product_id" value="<?php echo $pid; ?>">
-                    <input type="hidden" name="q" value="<?php echo htmlspecialchars($searchQuery); ?>">
+                <?php if ($canReview): ?>
+                    <form method="post" action="products.php" class="review-form">
+                        <h4>Write a Review</h4>
+                        <input type="hidden" name="action" value="submit_review">
+                        <input type="hidden" name="product_id" value="<?php echo $pid; ?>">
+                        <input type="hidden" name="q" value="<?php echo htmlspecialchars($searchQuery); ?>">
 
-                    <label for="rating">Rating</label>
-                    <select id="rating" name="rating" required>
-                        <option value="">Select rating</option>
-                        <option value="5">5 - Excellent</option>
-                        <option value="4">4 - Very Good</option>
-                        <option value="3">3 - Good</option>
-                        <option value="2">2 - Fair</option>
-                        <option value="1">1 - Poor</option>
-                    </select>
+                        <label for="rating">Rating</label>
+                        <select id="rating" name="rating" required>
+                            <option value="">Select rating</option>
+                            <option value="5">5 - Excellent</option>
+                            <option value="4">4 - Very Good</option>
+                            <option value="3">3 - Good</option>
+                            <option value="2">2 - Fair</option>
+                            <option value="1">1 - Poor</option>
+                        </select>
 
-                    <label for="comment">Your review</label>
-                    <textarea id="comment" name="comment" rows="4" maxlength="1000" placeholder="Share your experience..." required></textarea>
+                        <label for="comment">Your review</label>
+                        <textarea id="comment" name="comment" rows="4" maxlength="1000" placeholder="Share your experience..." required></textarea>
 
-                    <button type="submit">Submit Review</button>
-                </form>
+                        <button type="submit" class="action-btn">Submit Review</button>
+                    </form>
+                <?php else: ?>
+                    <p class="review-lock">Only users who purchased this product can submit a review.</p>
+                <?php endif; ?>
             </div>
         </div>
+
+        <script>
+            (function () {
+                const qtyInput = document.getElementById('buy_qty');
+                const totalNode = document.getElementById('totalAmount');
+                if (!qtyInput || !totalNode) {
+                    return;
+                }
+
+                const unitPrice = <?php echo json_encode((float) $selectedProduct['price']); ?>;
+                const maxQty = <?php echo json_encode($qty); ?>;
+
+                function updateTotal() {
+                    let value = parseInt(qtyInput.value, 10);
+                    if (Number.isNaN(value) || value < 1) {
+                        value = 1;
+                    }
+                    if (value > maxQty) {
+                        value = maxQty;
+                    }
+                    qtyInput.value = value;
+                    totalNode.textContent = (unitPrice * value).toFixed(2);
+                }
+
+                qtyInput.addEventListener('input', updateTotal);
+                updateTotal();
+            })();
+        </script>
     <?php endif; ?>
 </body>
 </html>
