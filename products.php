@@ -31,11 +31,14 @@ if ($studentCheckStmt) {
     }
 }
 
-function buildRedirectUrl(string $search, int $productId = 0): string
+function buildRedirectUrl(string $search, int $productId = 0, string $sort = 'recent'): string
 {
     $params = [];
     if ($search !== '') {
         $params['q'] = $search;
+    }
+    if ($sort === 'rating') {
+        $params['sort'] = 'rating';
     }
     if ($productId > 0) {
         $params['product'] = $productId;
@@ -47,6 +50,7 @@ function buildRedirectUrl(string $search, int $productId = 0): string
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
     $searchRedirect = trim($_POST['q'] ?? '');
+    $sortRedirect = ($_POST['sort'] ?? 'recent') === 'rating' ? 'rating' : 'recent';
     $postProductId = (int) ($_POST['product_id'] ?? 0);
 
     if ($action === 'buy_product') {
@@ -54,7 +58,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($postProductId <= 0 || $buyQty <= 0) {
             $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Invalid product or quantity.'];
-            header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId));
+            header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId, $sortRedirect));
             exit();
         }
 
@@ -170,7 +174,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit();
         }
 
-        header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId));
+        header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId, $sortRedirect));
         exit();
     }
 
@@ -180,19 +184,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($postProductId <= 0) {
             $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Invalid product for review.'];
-            header('Location: ' . buildRedirectUrl($searchRedirect));
+            header('Location: ' . buildRedirectUrl($searchRedirect, 0, $sortRedirect));
             exit();
         }
 
         if ($rating < 1 || $rating > 5) {
             $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Rating must be between 1 and 5.'];
-            header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId));
+            header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId, $sortRedirect));
             exit();
         }
 
         if ($comment === '') {
             $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Please write a review comment.'];
-            header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId));
+            header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId, $sortRedirect));
             exit();
         }
 
@@ -201,7 +205,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if (!$existsStmt) {
                 $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Could not verify product.'];
-                header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId));
+                header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId, $sortRedirect));
                 exit();
             }
 
@@ -213,7 +217,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if (!$exists) {
                 $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Product not found for review.'];
-                header('Location: ' . buildRedirectUrl($searchRedirect));
+                header('Location: ' . buildRedirectUrl($searchRedirect, 0, $sortRedirect));
                 exit();
             }
 
@@ -224,7 +228,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if (!$buyerStmt) {
                 $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Could not verify review eligibility.'];
-                header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId));
+                header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId, $sortRedirect));
                 exit();
             }
 
@@ -236,7 +240,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if (!$hasBought) {
                 $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Only users who bought this product can review it.'];
-                header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId));
+                header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId, $sortRedirect));
+                exit();
+            }
+
+            $reviewedStmt = mysqli_prepare(
+                $con,
+                'SELECT review_id FROM reviews WHERE product_id = ? AND reviewer_id = ? LIMIT 1'
+            );
+
+            if (!$reviewedStmt) {
+                $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'Could not verify previous reviews.'];
+                header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId, $sortRedirect));
+                exit();
+            }
+
+            mysqli_stmt_bind_param($reviewedStmt, 'ii', $postProductId, $studentId);
+            mysqli_stmt_execute($reviewedStmt);
+            $reviewedResult = mysqli_stmt_get_result($reviewedStmt);
+            $alreadyReviewed = $reviewedResult ? mysqli_fetch_assoc($reviewedResult) : null;
+            mysqli_stmt_close($reviewedStmt);
+
+            if ($alreadyReviewed) {
+                $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'You can review this product only once.'];
+                header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId, $sortRedirect));
                 exit();
             }
 
@@ -270,7 +297,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['product_flash'] = ['type' => 'error', 'message' => 'A database error occurred while submitting review.'];
         }
 
-        header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId));
+        header('Location: ' . buildRedirectUrl($searchRedirect, $postProductId, $sortRedirect));
         exit();
     }
 }
@@ -279,10 +306,14 @@ $flash = $_SESSION['product_flash'] ?? null;
 unset($_SESSION['product_flash']);
 
 $searchQuery = trim($_GET['q'] ?? '');
+$sort = ($_GET['sort'] ?? 'recent') === 'rating' ? 'rating' : 'recent';
 $selectedProductId = (int) ($_GET['product'] ?? 0);
 $products = [];
 $reviewsByProduct = [];
 $selectedProduct = null;
+$orderByClause = $sort === 'rating'
+    ? 'avg_rating DESC, review_count DESC, p.created_at DESC'
+    : 'p.created_at DESC';
 
 $productSql = "
     SELECT
@@ -301,20 +332,25 @@ $productSql = "
             SELECT 1
             FROM buy_product bp
             WHERE bp.product_id = p.product_id AND bp.buyer_id = ?
-        ) AS has_bought
+        ) AS has_bought,
+        EXISTS(
+            SELECT 1
+            FROM reviews rr
+            WHERE rr.product_id = p.product_id AND rr.reviewer_id = ?
+        ) AS has_reviewed
     FROM products p
     INNER JOIN students st ON p.owner_id = st.student_id
     LEFT JOIN reviews r ON r.product_id = p.product_id
     WHERE (? = '' OR p.product_title LIKE ? OR COALESCE(p.description, '') LIKE ?)
     GROUP BY p.product_id, p.owner_id, p.product_title, p.description, p.price, p.qty, p.status, p.created_at, st.username
-    ORDER BY p.created_at DESC
+    ORDER BY $orderByClause
 ";
 
 $productStmt = mysqli_prepare($con, $productSql);
 
 if ($productStmt) {
     $searchLike = '%' . $searchQuery . '%';
-    mysqli_stmt_bind_param($productStmt, 'isss', $studentId, $searchQuery, $searchLike, $searchLike);
+    mysqli_stmt_bind_param($productStmt, 'iisss', $studentId, $studentId, $searchQuery, $searchLike, $searchLike);
 
     mysqli_stmt_execute($productStmt);
     $productResult = mysqli_stmt_get_result($productStmt);
@@ -459,6 +495,60 @@ foreach ($products as $productRow) {
 
         .link-button {
             background: linear-gradient(120deg, #1e293b, #334155);
+        }
+
+        .link-button.is-active {
+            background: linear-gradient(120deg, #0ea5e9, #0f766e);
+        }
+
+        .sort-menu {
+            position: relative;
+        }
+
+        .sort-trigger {
+            list-style: none;
+            user-select: none;
+        }
+
+        .sort-trigger::-webkit-details-marker {
+            display: none;
+        }
+
+        .sort-options {
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            min-width: 180px;
+            border: 1px solid #cbd5e1;
+            border-radius: 10px;
+            background: #fff;
+            box-shadow: 0 14px 24px rgba(15, 23, 42, 0.16);
+            z-index: 30;
+            overflow: hidden;
+        }
+
+        .sort-option {
+            display: block;
+            padding: 9px 12px;
+            text-decoration: none;
+            color: #334155;
+            font-size: 0.9rem;
+            border-bottom: 1px solid #e2e8f0;
+            background: #fff;
+        }
+
+        .sort-option:last-child {
+            border-bottom: 0;
+        }
+
+        .sort-option:hover {
+            background: #f1f5f9;
+        }
+
+        .sort-option.active {
+            background: #ecfeff;
+            color: #0f766e;
+            font-weight: 700;
         }
 
         .products-grid {
@@ -698,7 +788,7 @@ foreach ($products as $productRow) {
         <header class="topbar">
             <div class="brand">
                 <h1>CampusLink Products</h1>
-                <p>Buy products by quantity and review items you actually purchased.</p>
+                <p>Life became so easy :) </p>
             </div>
             <div class="user-menu">
                 <button class="user-trigger" type="button"><?php echo $username; ?></button>
@@ -714,7 +804,7 @@ foreach ($products as $productRow) {
         <div class="products-wrap">
             <section class="products-hero">
                 <h2>Listed Products</h2>
-                <p>Search, open details, choose quantity, and buy instantly. Product remains available until quantity reaches zero.</p>
+                <p>Buy Products with ease</p>
             </section>
 
             <?php if (is_array($flash) && isset($flash['message'])): ?>
@@ -726,9 +816,29 @@ foreach ($products as $productRow) {
             <section class="toolbar">
                 <form class="search-form" method="get" action="products.php">
                     <input type="search" name="q" placeholder="Search products by title or description..." value="<?php echo htmlspecialchars($searchQuery); ?>">
+                    <input type="hidden" name="sort" value="<?php echo htmlspecialchars($sort); ?>">
                     <button type="submit" class="action-btn">Search</button>
                 </form>
-                <a class="link-button" href="products.php">Show All</a>
+                <details class="sort-menu">
+                    <summary class="link-button sort-trigger">
+                        Sort: <?php echo $sort === 'rating' ? 'Top Rated' : 'Newest'; ?>
+                    </summary>
+                    <div class="sort-options">
+                        <a
+                            class="sort-option <?php echo $sort === 'recent' ? 'active' : ''; ?>"
+                            href="<?php echo htmlspecialchars(buildRedirectUrl($searchQuery, 0, 'recent')); ?>"
+                        >
+                            Newest
+                        </a>
+                        <a
+                            class="sort-option <?php echo $sort === 'rating' ? 'active' : ''; ?>"
+                            href="<?php echo htmlspecialchars(buildRedirectUrl($searchQuery, 0, 'rating')); ?>"
+                        >
+                            Top Rated
+                        </a>
+                    </div>
+                </details>
+                <a class="link-button" href="products.php">Reset</a>
             </section>
 
             <section class="section">
@@ -747,6 +857,9 @@ foreach ($products as $productRow) {
                                 $queryParams = [];
                                 if ($searchQuery !== '') {
                                     $queryParams['q'] = $searchQuery;
+                                }
+                                if ($sort === 'rating') {
+                                    $queryParams['sort'] = 'rating';
                                 }
                                 $queryParams['product'] = $pid;
                                 $cardHref = 'products.php?' . http_build_query($queryParams);
@@ -785,10 +898,15 @@ foreach ($products as $productRow) {
             $productReviews = $reviewsByProduct[$pid] ?? [];
             $isOwner = ((int) $selectedProduct['owner_id']) === $studentId;
             $canBuy = !$isOwner && $qty > 0;
-            $canReview = ((int) ($selectedProduct['has_bought'] ?? 0)) === 1;
+            $hasBought = ((int) ($selectedProduct['has_bought'] ?? 0)) === 1;
+            $hasReviewed = ((int) ($selectedProduct['has_reviewed'] ?? 0)) === 1;
+            $canReview = $hasBought && !$hasReviewed;
             $closeParams = [];
             if ($searchQuery !== '') {
                 $closeParams['q'] = $searchQuery;
+            }
+            if ($sort === 'rating') {
+                $closeParams['sort'] = 'rating';
             }
             $closeHref = 'products.php' . (count($closeParams) > 0 ? '?' . http_build_query($closeParams) : '');
             $defaultQty = $qty > 0 ? 1 : 0;
@@ -816,6 +934,7 @@ foreach ($products as $productRow) {
                         <input type="hidden" name="action" value="buy_product">
                         <input type="hidden" name="product_id" value="<?php echo $pid; ?>">
                         <input type="hidden" name="q" value="<?php echo htmlspecialchars($searchQuery); ?>">
+                        <input type="hidden" name="sort" value="<?php echo htmlspecialchars($sort); ?>">
 
                         <label for="buy_qty">Quantity</label>
                         <input
@@ -871,6 +990,7 @@ foreach ($products as $productRow) {
                         <input type="hidden" name="action" value="submit_review">
                         <input type="hidden" name="product_id" value="<?php echo $pid; ?>">
                         <input type="hidden" name="q" value="<?php echo htmlspecialchars($searchQuery); ?>">
+                        <input type="hidden" name="sort" value="<?php echo htmlspecialchars($sort); ?>">
 
                         <label for="rating">Rating</label>
                         <select id="rating" name="rating" required>
@@ -888,7 +1008,15 @@ foreach ($products as $productRow) {
                         <button type="submit" class="action-btn">Submit Review</button>
                     </form>
                 <?php else: ?>
-                    <p class="review-lock">Only users who purchased this product can submit a review.</p>
+                    <p class="review-lock">
+                        <?php
+                            if (!$hasBought) {
+                                echo 'Only users who purchased this product can submit a review.';
+                            } else {
+                                echo 'You already submitted your one allowed review for this product.';
+                            }
+                        ?>
+                    </p>
                 <?php endif; ?>
             </div>
         </div>

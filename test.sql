@@ -16,3 +16,12 @@ INSERT INTO `companies` (`company_id`, `username`, `passwd`, `name`, `address`, 
 
 INSERT INTO `jobs` (`job_id`, `company_id`, `job_title`, `description`, `salary`, `created_at`) VALUES 
 (NULL, '1', 'Junior Software Engineer', 'Expirenced in Java & Python', '30000', current_timestamp());
+
+
+INSERT INTO `products` (`product_id`, `owner_id`, `product_title`, `description`, `price`, `qty`, `status`, `created_at`) VALUES 
+(NULL, '1', 'IC Circuits', 'Authentic products only', '50', '20', 'available', current_timestamp()),
+(NULL, '1', 'Earrings (Silver)', '18K Silver Halmarked', '2000', '2', 'available', current_timestamp());
+
+INSERT INTO `products` (`product_id`, `owner_id`, `product_title`, `description`, `price`, `qty`, `status`, `created_at`) VALUES
+(NULL, '1', 'Antique Clock', 'Made in 1918', '25500', '1', 'available', current_timestamp()),
+(NULL, '1', 'Cooking Set', 'The items are made in China, 100% Stainless Steel. There is a 2 year warranty with the product', '2500', '5', 'available', current_timestamp());
