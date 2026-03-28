@@ -373,6 +373,7 @@ if (count($products) > 0) {
     $reviewSql = "
         SELECT
             r.product_id,
+            r.reviewer_id,
             r.rating,
             r.comment,
             r.created_at,
@@ -613,6 +614,17 @@ foreach ($products as $productRow) {
         .meta {
             color: #64748b;
             font-size: 0.86rem;
+        }
+
+        .profile-link-inline {
+            color: inherit;
+            text-decoration: none;
+            font-weight: 700;
+        }
+
+        .profile-link-inline:hover {
+            color: #0f766e;
+            text-decoration: underline;
         }
 
         .price {
@@ -870,7 +882,12 @@ foreach ($products as $productRow) {
                                         <h4 class="product-title"><?php echo htmlspecialchars($product['product_title']); ?></h4>
                                         <span class="status-pill <?php echo $statusClass; ?>"><?php echo htmlspecialchars($displayStatus); ?></span>
                                     </div>
-                                    <p class="meta">By <?php echo htmlspecialchars($product['owner_username']); ?></p>
+                                    <p class="meta">
+                                        By
+                                        <a class="profile-link-inline" href="profile.php?type=student&amp;id=<?php echo (int) $product['owner_id']; ?>">
+                                            <?php echo htmlspecialchars($product['owner_username']); ?>
+                                        </a>
+                                    </p>
                                     <p><?php echo htmlspecialchars($product['description'] ?? 'No description provided.'); ?></p>
                                     <p class="qty-text">Stock left: <?php echo $qty; ?></p>
                                     <p class="price">$<?php echo number_format((float) $product['price'], 2); ?></p>
@@ -918,7 +935,11 @@ foreach ($products as $productRow) {
                     <div>
                         <h3><?php echo htmlspecialchars($selectedProduct['product_title']); ?></h3>
                         <p class="meta">
-                            By <?php echo htmlspecialchars($selectedProduct['owner_username']); ?> |
+                            By
+                            <a class="profile-link-inline" href="profile.php?type=student&amp;id=<?php echo (int) $selectedProduct['owner_id']; ?>">
+                                <?php echo htmlspecialchars($selectedProduct['owner_username']); ?>
+                            </a>
+                            |
                             <span class="status-pill <?php echo $statusClass; ?>"><?php echo htmlspecialchars($displayStatus); ?></span>
                         </p>
                     </div>
@@ -972,7 +993,12 @@ foreach ($products as $productRow) {
                             <?php foreach ($productReviews as $review): ?>
                                 <article class="review-item">
                                     <div class="review-head">
-                                        <span><?php echo htmlspecialchars($review['reviewer_username']); ?> | <?php echo (int) $review['rating']; ?>/5</span>
+                                        <span>
+                                            <a class="profile-link-inline" href="profile.php?type=student&amp;id=<?php echo (int) $review['reviewer_id']; ?>">
+                                                <?php echo htmlspecialchars($review['reviewer_username']); ?>
+                                            </a>
+                                            | <?php echo (int) $review['rating']; ?>/5
+                                        </span>
                                         <span><?php echo htmlspecialchars(date('M j, Y', strtotime((string) $review['created_at']))); ?></span>
                                     </div>
                                     <p><?php echo nl2br(htmlspecialchars($review['comment'] ?? '')); ?></p>

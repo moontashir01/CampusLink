@@ -33,6 +33,7 @@ $companyName = htmlspecialchars($_SESSION['username'] ?? 'Company');
             <div class="user-menu">
                 <button class="user-trigger" type="button"><?php echo $companyName; ?></button>
                 <div class="dropdown">
+                    <a href="myProfile.php">My Profile</a>
                     <form method="post" action="logout.php" class="logout-form">
                         <button type="submit" class="dropdown-action">Log Out</button>
                     </form>

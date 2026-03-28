@@ -18,7 +18,7 @@ $products = [];
 $jobs = [];
 
 $serviceSql = "
-    SELECT s.service_title, s.description, s.price, st.username AS owner_username
+    SELECT s.student_id, s.service_title, s.description, s.price, st.username AS owner_username
     FROM services s
     INNER JOIN students st ON s.student_id = st.student_id
     ORDER BY s.created_at DESC
@@ -26,7 +26,7 @@ $serviceSql = "
 ";
 
 $productSql = "
-    SELECT p.product_title, p.description, p.price, p.status, st.username AS owner_username
+    SELECT p.owner_id, p.product_title, p.description, p.price, p.status, st.username AS owner_username
     FROM products p
     INNER JOIN students st ON p.owner_id = st.student_id
     ORDER BY p.created_at DESC
@@ -34,7 +34,7 @@ $productSql = "
 ";
 
 $jobSql = "
-    SELECT j.job_title, j.description, j.salary, c.name AS company_name
+    SELECT j.company_id, j.job_title, j.description, j.salary, c.name AS company_name
     FROM jobs j
     INNER JOIN companies c ON j.company_id = c.company_id
     ORDER BY j.created_at DESC
@@ -82,7 +82,7 @@ if ($jobResult) {
             <div class="user-menu">
                 <button class="user-trigger" type="button"><?php echo $username; ?></button>
                 <div class="dropdown">
-                    <a href="profile.php">My Profile</a>
+                    <a href="myProfile.php">My Profile</a>
                     <form method="post" action="logout.php" class="logout-form">
                         <button type="submit" class="dropdown-action">Log Out</button>
                     </form>
@@ -96,17 +96,25 @@ if ($jobResult) {
         </section>
 
         <nav class="quick-tabs">
-            <a class="tab-card" href="#services">
+            <a class="tab-card" href="services.php">
                 <h3>Find Services</h3>
                 <p>Hire talented students for quick campus tasks.</p>
             </a>
             <a class="tab-card" href="products.php">
-                <h3>Listed Products</h3>
+                <h3>Buy Products</h3>
                 <p>Buy and sell useful items within your community.</p>
             </a>
             <a class="tab-card" href="#jobs">
                 <h3>Find Jobs</h3>
                 <p>Explore internships and part-time openings.</p>
+            </a>
+            <a class="tab-card" href="offer.php">
+                <h3>Offer Services</h3>
+                <p>Have skills? Join the experts lines</p>
+            </a>
+            <a class="tab-card" href="list.php">
+                <h3>List Products</h3>
+                <p>Sell Products with just few steps.</p>
             </a>
         </nav>
 
@@ -117,7 +125,12 @@ if ($jobResult) {
                     <?php foreach ($services as $service): ?>
                         <article class="item">
                             <h4><?php echo htmlspecialchars($service['service_title']); ?></h4>
-                            <p class="meta">By <?php echo htmlspecialchars($service['owner_username']); ?></p>
+                            <p class="meta">
+                                By
+                                <a class="profile-link-inline" href="profile.php?type=student&amp;id=<?php echo (int) $service['student_id']; ?>">
+                                    <?php echo htmlspecialchars($service['owner_username']); ?>
+                                </a>
+                            </p>
                             <p><?php echo htmlspecialchars($service['description'] ?? 'No description provided.'); ?></p>
                             <p class="price">$<?php echo number_format((float)$service['price'], 2); ?></p>
                         </article>
@@ -129,13 +142,19 @@ if ($jobResult) {
         </section>
 
         <section id="products" class="section">
-            <h3>Listed Products</h3>
+            <h3>Buy Products</h3>
             <?php if (count($products) > 0): ?>
                 <div class="grid">
                     <?php foreach ($products as $product): ?>
                         <article class="item">
                             <h4><?php echo htmlspecialchars($product['product_title']); ?></h4>
-                            <p class="meta">By <?php echo htmlspecialchars($product['owner_username']); ?> | <?php echo htmlspecialchars(ucfirst($product['status'])); ?></p>
+                            <p class="meta">
+                                By
+                                <a class="profile-link-inline" href="profile.php?type=student&amp;id=<?php echo (int) $product['owner_id']; ?>">
+                                    <?php echo htmlspecialchars($product['owner_username']); ?>
+                                </a>
+                                | <?php echo htmlspecialchars(ucfirst($product['status'])); ?>
+                            </p>
                             <p><?php echo htmlspecialchars($product['description'] ?? 'No description provided.'); ?></p>
                             <p class="price">$<?php echo number_format((float)$product['price'], 2); ?></p>
                         </article>
@@ -153,7 +172,11 @@ if ($jobResult) {
                     <?php foreach ($jobs as $job): ?>
                         <article class="item">
                             <h4><?php echo htmlspecialchars($job['job_title']); ?></h4>
-                            <p class="meta"><?php echo htmlspecialchars($job['company_name']); ?></p>
+                            <p class="meta">
+                                <a class="profile-link-inline" href="profile.php?type=company&amp;id=<?php echo (int) $job['company_id']; ?>">
+                                    <?php echo htmlspecialchars($job['company_name']); ?>
+                                </a>
+                            </p>
                             <p><?php echo htmlspecialchars($job['description'] ?? 'No description provided.'); ?></p>
                             <p class="price">$<?php echo number_format((float)$job['salary'], 2); ?></p>
                         </article>

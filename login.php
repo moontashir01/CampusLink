@@ -41,7 +41,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($displayName === '') {
                     $displayName = $student['username'];
                 }
-
+                
                 $_SESSION['role'] = 'student';
                 $_SESSION['student_id'] = (int) $student['student_id'];
                 $_SESSION['username'] = $displayName;

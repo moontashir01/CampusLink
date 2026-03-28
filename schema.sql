@@ -48,7 +48,7 @@ CREATE TABLE products (
     description TEXT,
     price DECIMAL(10,2),
     qty INT(6),
-    status ENUM('available', 'reserved', 'sold') NOT NULL DEFAULT 'available',
+    status ENUM('available', 'sold') NOT NULL DEFAULT 'available',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     FOREIGN KEY (owner_id) REFERENCES students(student_id)
@@ -60,7 +60,7 @@ CREATE TABLE buy_product (
     
     product_id INT UNSIGNED NOT NULL,
     buyer_id INT UNSIGNED NOT NULL,
-    
+    qty INT(6),
     bought_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     
     FOREIGN KEY (product_id) REFERENCES products(product_id)
