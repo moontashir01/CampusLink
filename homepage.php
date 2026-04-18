@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once 'connection.php';
+require_once 'verification_helpers.php';
 
 if (($_SESSION['role'] ?? '') !== 'student' || !isset($_SESSION['student_id'])) {
     if (($_SESSION['role'] ?? '') === 'company' && isset($_SESSION['company_id'])) {
@@ -18,7 +19,7 @@ $products = [];
 $jobs = [];
 
 $serviceSql = "
-    SELECT s.student_id, s.service_title, s.description, s.price, st.username AS owner_username
+    SELECT s.student_id, s.service_title, s.description, s.price, st.username AS owner_username, st.is_verified AS owner_verified
     FROM services s
     INNER JOIN students st ON s.student_id = st.student_id
     ORDER BY s.created_at DESC
@@ -26,7 +27,7 @@ $serviceSql = "
 ";
 
 $productSql = "
-    SELECT p.owner_id, p.product_title, p.description, p.price, p.status, st.username AS owner_username
+    SELECT p.owner_id, p.product_title, p.description, p.price, p.status, st.username AS owner_username, st.is_verified AS owner_verified
     FROM products p
     INNER JOIN students st ON p.owner_id = st.student_id
     ORDER BY p.created_at DESC
@@ -128,7 +129,7 @@ if ($jobResult) {
                             <p class="meta">
                                 By
                                 <a class="profile-link-inline" href="profile.php?type=student&amp;id=<?php echo (int) $service['student_id']; ?>">
-                                    <?php echo htmlspecialchars($service['owner_username']); ?>
+                                    <?php echo renderVerifiedName((string) $service['owner_username'], isVerifiedUser($service['owner_verified'] ?? 0)); ?>
                                 </a>
                             </p>
                             <p><?php echo htmlspecialchars($service['description'] ?? 'No description provided.'); ?></p>
@@ -151,7 +152,7 @@ if ($jobResult) {
                             <p class="meta">
                                 By
                                 <a class="profile-link-inline" href="profile.php?type=student&amp;id=<?php echo (int) $product['owner_id']; ?>">
-                                    <?php echo htmlspecialchars($product['owner_username']); ?>
+                                    <?php echo renderVerifiedName((string) $product['owner_username'], isVerifiedUser($product['owner_verified'] ?? 0)); ?>
                                 </a>
                                 | <?php echo htmlspecialchars(ucfirst($product['status'])); ?>
                             </p>

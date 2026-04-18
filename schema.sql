@@ -9,8 +9,15 @@ CREATE TABLE students(
     birth_day DATE NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     email VARCHAR(255) UNIQUE NOT NULL,
-    phone VARCHAR(20)
+    phone VARCHAR(20),
+    verification_code VARCHAR(6) DEFAULT NULL,
+    is_verified TINYINT(1) NOT NULL DEFAULT 0
 );
+
+-- Migration for existing databases:
+-- ALTER TABLE students
+-- ADD COLUMN verification_code VARCHAR(6) DEFAULT NULL,
+-- ADD COLUMN is_verified TINYINT(1) NOT NULL DEFAULT 0;
 
 CREATE TABLE services (
     service_id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

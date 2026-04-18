@@ -8,6 +8,12 @@ if (isset($_SESSION['role'])) {
 }
 
 $error = '';
+$success = '';
+
+if (isset($_SESSION['auth_success'])) {
+    $success = (string) $_SESSION['auth_success'];
+    unset($_SESSION['auth_success']);
+}
 
 function verifyPassword(string $inputPassword, string $storedPassword): bool
 {
@@ -27,7 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($username === '' || $password === '') {
         $error = 'Please enter both username and password.';
     } else {
-        $stmt = mysqli_prepare($con, 'SELECT student_id, username, passwd, f_name, l_name FROM students WHERE username = ? LIMIT 1');
+        $stmt = mysqli_prepare($con, 'SELECT student_id, username, passwd, f_name, l_name, email, is_verified FROM students WHERE username = ? LIMIT 1');
 
         if ($stmt) {
             mysqli_stmt_bind_param($stmt, 's', $username);
@@ -37,6 +43,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             mysqli_stmt_close($stmt);
 
             if ($student && verifyPassword($password, $student['passwd'])) {
+                if ((int) ($student['is_verified'] ?? 0) !== 1) {
+                    $_SESSION['pending_email'] = $student['email'];
+                    $_SESSION['verification_notice'] = 'Verify your email to continue. Enter your latest 6-digit code.';
+                    header('Location: verify.php');
+                    exit();
+                }
+
                 $displayName = trim(($student['f_name'] ?? '') . ' ' . ($student['l_name'] ?? ''));
                 if ($displayName === '') {
                     $displayName = $student['username'];
@@ -96,6 +109,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 <?php if ($error !== ''): ?>
                     <div class="auth-message error"><?php echo htmlspecialchars($error); ?></div>
+                <?php endif; ?>
+
+                <?php if ($success !== ''): ?>
+                    <div class="auth-message success"><?php echo htmlspecialchars($success); ?></div>
                 <?php endif; ?>
 
                 <form class="auth-form" method="post" action="login.php" novalidate>

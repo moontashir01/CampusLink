@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once 'connection.php';
+require_once 'verification_mailer.php';
 
 if (isset($_SESSION['role'])) {
     header('Location: homepage.php');
@@ -49,17 +50,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $mName = $mName === '' ? null : $mName;
                 $lName = $lName === '' ? null : $lName;
                 $phone = $phone === '' ? null : $phone;
+                $verificationCode = generateVerificationCode();
+                $fullName = trim($fName . ' ' . ($lName ?? ''));
 
                 $stmt = mysqli_prepare(
                     $con,
-                    'INSERT INTO students (username, passwd, f_name, m_name, l_name, address, birth_day, email, phone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                    'INSERT INTO students (username, passwd, f_name, m_name, l_name, address, birth_day, email, phone, verification_code, is_verified) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)'
                 );
 
                 if ($stmt) {
-                    mysqli_stmt_bind_param($stmt, 'sssssssss', $username, $passwordHash, $fName, $mName, $lName, $address, $birthDay, $email, $phone);
+                    mysqli_stmt_bind_param($stmt, 'ssssssssss', $username, $passwordHash, $fName, $mName, $lName, $address, $birthDay, $email, $phone, $verificationCode);
 
                     if (mysqli_stmt_execute($stmt)) {
-                        $success = 'Student account created successfully. You can now log in.';
+                        try {
+                            sendVerificationCodeEmail($email, $fullName, $verificationCode);
+                            $_SESSION['pending_email'] = $email;
+                            $_SESSION['verification_notice'] = 'We sent a 6-digit verification code to your email.';
+                            header('Location: verify.php');
+                            exit();
+                        } catch (\Exception $mailException) {
+                            $_SESSION['pending_email'] = $email;
+                            $_SESSION['verification_notice'] = 'Account created, but email delivery failed. Request a fresh code.';
+                            header('Location: verification_resume.php');
+                            exit();
+                        }
                     } else {
                         $error = mysqli_errno($con) === 1062
                             ? 'Username or email already exists.'

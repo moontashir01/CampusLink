@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once 'connection.php';
+require_once 'verification_helpers.php';
 
 function isFilled($value)
 {
@@ -125,11 +126,12 @@ $profileData = [];
 $profileStats = [];
 $activityItems = [];
 $found = false;
+$isVerified = false;
 
 if ($targetType === 'student') {
     $stmt = mysqli_prepare(
         $con,
-        'SELECT student_id, username, f_name, m_name, l_name, address, birth_day, email, phone, created_at
+        'SELECT student_id, username, f_name, m_name, l_name, address, birth_day, email, phone, created_at, is_verified
          FROM students
          WHERE student_id = ?
          LIMIT 1'
@@ -153,6 +155,7 @@ if ($targetType === 'student') {
             }
 
             $displayName = $fullName;
+            $isVerified = isVerifiedUser($student['is_verified'] ?? 0);
             $usernameTag = '@' . normalizeValue($student['username'] ?? '');
             $memberSince = formatDateValue($student['created_at'] ?? null);
             $roleMessage = 'Student profile details and activity across services, products, and job applications.';
@@ -162,6 +165,7 @@ if ($targetType === 'student') {
                 'Account Type' => $accountType,
                 'Full Name' => normalizeValue($fullName),
                 'Username' => normalizeValue($student['username'] ?? ''),
+                'Verification' => renderVerificationStatus($isVerified),
                 'Email' => normalizeValue($student['email'] ?? ''),
                 'Phone' => normalizeValue($student['phone'] ?? ''),
                 'Address' => normalizeValue($student['address'] ?? ''),
@@ -389,11 +393,14 @@ $avatarInitials = buildInitials($displayName);
         <section class="profile-hero-card">
             <div class="profile-hero-copy">
                 <p class="profile-badge"><?php echo htmlspecialchars($accountType); ?> Account</p>
-                <h2><?php echo htmlspecialchars($displayName); ?></h2>
+                <h2><?php echo renderVerifiedName($displayName, $isVerified); ?></h2>
                 <p class="profile-subtitle"><?php echo htmlspecialchars($roleMessage); ?></p>
                 <div class="profile-pill-row">
                     <span class="profile-pill"><?php echo htmlspecialchars($usernameTag); ?></span>
                     <span class="profile-pill">Member since <?php echo htmlspecialchars($memberSince); ?></span>
+                    <?php if ($targetType === 'student'): ?>
+                        <span class="verified-status"><?php echo htmlspecialchars(renderVerificationStatus($isVerified)); ?></span>
+                    <?php endif; ?>
                 </div>
             </div>
             <div class="profile-avatar" aria-hidden="true"><?php echo htmlspecialchars($avatarInitials); ?></div>

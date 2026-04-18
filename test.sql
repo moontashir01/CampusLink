@@ -1,7 +1,7 @@
 
 
-INSERT INTO `students` (`student_id`, `username`, `passwd`, `f_name`, `m_name`, `l_name`, `address`, `birth_day`, `created_at`, `email`, `phone`) VALUES
-(NULL, 'test', 'test', 'test', NULL, NULL, 'dhk', '2016-03-03', current_timestamp(), 'test@test.com', '01955994096');
+INSERT INTO `students` (`student_id`, `username`, `passwd`, `f_name`, `m_name`, `l_name`, `address`, `birth_day`, `created_at`, `email`, `phone`, `verification_code`, `is_verified`) VALUES
+(NULL, 'test', 'test', 'test', NULL, NULL, 'dhk', '2016-03-03', current_timestamp(), 'test@test.com', '01955994096', NULL, 1);
 
 
 INSERT INTO `products` (`product_id`, `owner_id`, `product_title`, `description`, `price`, `qty` , `status`, `created_at`) VALUES 

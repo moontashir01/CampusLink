@@ -299,7 +299,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     <div class="list-grid">
                         <div>
-                            <label for="price">Price (USD) *</label>
+                            <label for="price">Price (BDT) *</label>
                             <input
                                 type="number"
                                 id="price"

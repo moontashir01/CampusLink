@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once 'connection.php';
+require_once 'verification_helpers.php';
 
 if (($_SESSION['role'] ?? '') !== 'student' || !isset($_SESSION['student_id'])) {
     if (($_SESSION['role'] ?? '') === 'company' && isset($_SESSION['company_id'])) {
@@ -326,6 +327,7 @@ $productSql = "
         p.status,
         p.created_at,
         st.username AS owner_username,
+        st.is_verified AS owner_verified,
         COALESCE(AVG(r.rating), 0) AS avg_rating,
         COUNT(r.review_id) AS review_count,
         EXISTS(
@@ -342,7 +344,7 @@ $productSql = "
     INNER JOIN students st ON p.owner_id = st.student_id
     LEFT JOIN reviews r ON r.product_id = p.product_id
     WHERE (? = '' OR p.product_title LIKE ? OR COALESCE(p.description, '') LIKE ?)
-    GROUP BY p.product_id, p.owner_id, p.product_title, p.description, p.price, p.qty, p.status, p.created_at, st.username
+    GROUP BY p.product_id, p.owner_id, p.product_title, p.description, p.price, p.qty, p.status, p.created_at, st.username, st.is_verified
     ORDER BY $orderByClause
 ";
 
@@ -377,7 +379,8 @@ if (count($products) > 0) {
             r.rating,
             r.comment,
             r.created_at,
-            st.username AS reviewer_username
+            st.username AS reviewer_username,
+            st.is_verified AS reviewer_verified
         FROM reviews r
         INNER JOIN students st ON r.reviewer_id = st.student_id
         WHERE r.product_id IN ($placeholders)
@@ -885,7 +888,7 @@ foreach ($products as $productRow) {
                                     <p class="meta">
                                         By
                                         <a class="profile-link-inline" href="profile.php?type=student&amp;id=<?php echo (int) $product['owner_id']; ?>">
-                                            <?php echo htmlspecialchars($product['owner_username']); ?>
+                                            <?php echo renderVerifiedName((string) $product['owner_username'], isVerifiedUser($product['owner_verified'] ?? 0)); ?>
                                         </a>
                                     </p>
                                     <p><?php echo htmlspecialchars($product['description'] ?? 'No description provided.'); ?></p>
@@ -937,7 +940,7 @@ foreach ($products as $productRow) {
                         <p class="meta">
                             By
                             <a class="profile-link-inline" href="profile.php?type=student&amp;id=<?php echo (int) $selectedProduct['owner_id']; ?>">
-                                <?php echo htmlspecialchars($selectedProduct['owner_username']); ?>
+                                <?php echo renderVerifiedName((string) $selectedProduct['owner_username'], isVerifiedUser($selectedProduct['owner_verified'] ?? 0)); ?>
                             </a>
                             |
                             <span class="status-pill <?php echo $statusClass; ?>"><?php echo htmlspecialchars($displayStatus); ?></span>
@@ -995,7 +998,7 @@ foreach ($products as $productRow) {
                                     <div class="review-head">
                                         <span>
                                             <a class="profile-link-inline" href="profile.php?type=student&amp;id=<?php echo (int) $review['reviewer_id']; ?>">
-                                                <?php echo htmlspecialchars($review['reviewer_username']); ?>
+                                                <?php echo renderVerifiedName((string) $review['reviewer_username'], isVerifiedUser($review['reviewer_verified'] ?? 0)); ?>
                                             </a>
                                             | <?php echo (int) $review['rating']; ?>/5
                                         </span>

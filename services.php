@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once 'connection.php';
+require_once 'verification_helpers.php';
 
 if (($_SESSION['role'] ?? '') !== 'student' || !isset($_SESSION['student_id'])) {
     if (($_SESSION['role'] ?? '') === 'company' && isset($_SESSION['company_id'])) {
@@ -217,6 +218,7 @@ $serviceSql = "
         s.price,
         s.created_at,
         st.username AS owner_username,
+        st.is_verified AS owner_verified,
         COALESCE(AVG(r.rating), 0) AS avg_rating,
         COUNT(r.review_id) AS review_count,
         (
@@ -240,7 +242,7 @@ $serviceSql = "
     INNER JOIN students st ON s.student_id = st.student_id
     LEFT JOIN reviews r ON r.service_id = s.service_id
     WHERE (? = '' OR s.service_title LIKE ? OR COALESCE(s.description, '') LIKE ?)
-    GROUP BY s.service_id, s.student_id, s.service_title, s.description, s.price, s.created_at, st.username
+    GROUP BY s.service_id, s.student_id, s.service_title, s.description, s.price, s.created_at, st.username, st.is_verified
     ORDER BY $orderByClause
 ";
 
@@ -262,7 +264,7 @@ if (count($services) > 0) {
     $serviceIds = array_map(static fn($row) => (int) $row['service_id'], $services);
     $placeholders = implode(',', array_fill(0, count($serviceIds), '?'));
     $reviewSql = "
-        SELECT r.service_id, r.reviewer_id, r.rating, r.comment, r.created_at, st.username AS reviewer_username
+        SELECT r.service_id, r.reviewer_id, r.rating, r.comment, r.created_at, st.username AS reviewer_username, st.is_verified AS reviewer_verified
         FROM reviews r
         INNER JOIN students st ON r.reviewer_id = st.student_id
         WHERE r.service_id IN ($placeholders)
@@ -374,7 +376,7 @@ if (count($services) > 0) {
                     <p class="meta-small">
                         By
                         <a class="profile-link-inline" href="profile.php?type=student&amp;id=<?php echo (int) $service['student_id']; ?>">
-                            <?php echo htmlspecialchars($service['owner_username']); ?>
+                            <?php echo renderVerifiedName((string) $service['owner_username'], isVerifiedUser($service['owner_verified'] ?? 0)); ?>
                         </a>
                     </p>
                     <p><?php echo htmlspecialchars($service['description'] ?? 'No description provided.'); ?></p>
@@ -400,7 +402,7 @@ if (count($services) > 0) {
                                     <div class="review-item">
                                         <p class="meta-small">
                                             <a class="profile-link-inline" href="profile.php?type=student&amp;id=<?php echo (int) $review['reviewer_id']; ?>">
-                                                <?php echo htmlspecialchars($review['reviewer_username']); ?>
+                                                <?php echo renderVerifiedName((string) $review['reviewer_username'], isVerifiedUser($review['reviewer_verified'] ?? 0)); ?>
                                             </a>
                                             | <?php echo (int) $review['rating']; ?>/5
                                         </p>
